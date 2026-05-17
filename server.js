@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// CORS PROXY BYPASS (Zorgt dat browsers online altijd mogen verbinden)
+// CODESPACES NETWORK BYPASS (Zorgt dat GitHub je browser niet blokkeert)
 app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
@@ -18,8 +18,8 @@ app.use((req, res, next) => {
     next();
 });
 
-// ONLINE BESTANDSOPSLAG MATRIX (Zorgt dat Notspay je bots onthoudt na een restart!)
-const dataFile = path.join(__dirname, 'notspay_multi_cluster.json');
+// STABIELE PERMANENTE BESTANDSOPSLAG (Onthoudt je bots, ook in GitHub Codespaces)
+const dataFile = path.join(__dirname, 'cluster_profiles.json');
 
 function leesData() {
     if (!fs.existsSync(dataFile)) {
@@ -104,13 +104,13 @@ async function startBotEngine(botId, token, scripts) {
         });
 
         client.once('ready', async () => {
-            console.log(`[ONLINE] Matrix node active: ${client.user.username}`);
+            console.log(`[OK] Bot succesvol ingelogd: ${client.user.username}`);
             const slashMenuLayout = [];
             if (scripts && scripts.length > 0) {
                 scripts.forEach(script => {
                     let commandName = script.bestandsnaam.toLowerCase().replace('.js', '').trim().replace(/[^a-z0-9]/g, '');
                     if (commandName.length > 0) {
-                        slashMenuLayout.push({ name: commandName, description: `Custom macro process mapped from script: ${script.bestandsnaam}` });
+                        slashMenuLayout.push({ name: commandName, description: `Custom command process: ${script.bestandsnaam}` });
                     }
                 });
             }
@@ -120,18 +120,19 @@ async function startBotEngine(botId, token, scripts) {
                     const guild = await client.guilds.fetch(guildId);
                     await guild.commands.set(slashMenuLayout).catch(() => {});
                 }
-            } catch (slashErr) {}
+            } catch (e) {}
         });
 
         await client.login(token);
     } catch (e) {
-        console.error(`[CRASH] Token handshake refused.`);
+        console.error(`[ERROR] Token handshaking geweigerd.`);
     }
 }
 
+// ENDPOINTS WAAR DE HTML RECHTSTREEKS MEE PRATEN KAN
 app.post('/api/sync-bot', async (req, res) => {
     const { token, scripts } = req.body;
-    if (!token || token.trim() === "") return res.json({ success: false, error: "No token provided." });
+    if (!token || token.trim() === "") return res.json({ success: false, error: "Token veld is leeg." });
 
     try {
         const testClient = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -141,14 +142,13 @@ app.post('/api/sync-bot', async (req, res) => {
         const botLogo = testClient.user.displayAvatarURL({ format: 'png', size: 256 }) || "https://cdn.discordapp.com/embed/avatars/0.png";
         testClient.destroy();
 
-        // Onthoud de bot permanent in de database file op de online host
         const database = leesData();
         database.profiles[botId] = { id: botId, token, naam: botNaam, logo: botLogo, scripts: scripts || [] };
         schrijfData(database);
 
         await startBotEngine(botId, token, scripts || []);
         res.json({ success: true, bot: { id: botId, naam: botNaam, logo: botLogo, status: "Online" } });
-    } catch (e) { res.json({ success: false, error: "Invalid Discord Token." }); }
+    } catch (e) { res.json({ success: false, error: "Dit bot token is ongeldig." }); }
 });
 
 app.post('/api/delete-bot', (req, res) => { 
@@ -232,7 +232,7 @@ app.post('/api/settings/update', async (req, res) => {
 
 app.post('/api/actie', async (req, res) => {
     const { actie, botId, token, scripts } = req.body;
-    if (!botId || !token) return res.json({ success: false, error: "Missing identity maps." });
+    if (!botId || !token) return res.json({ success: false, error: "Gekoppelde matrix ID ontbreekt." });
     if (actie === 'stop') { stopBotEngine(botId); return res.json({ success: true, status: "Offline" }); }
     if (actie === 'start' || actie === 'restart') { 
         await startBotEngine(botId, token, scripts || []); 
@@ -242,26 +242,27 @@ app.post('/api/actie', async (req, res) => {
 });
 
 app.post('/api/status', (req, res) => {
-    if (!req.body.botId) return res.json({ status: "Offline", uptime: "0s", cpu: 0, ram: 0, logs: ["Awaiting matrix target..."] });
+    if (!req.body.botId) return res.json({ status: "Offline", uptime: "0s", cpu: 0, ram: 0, logs: ["Wachten op inlog..."] });
     const bot = actieveBots.get(req.body.botId);
     res.json({
         status: bot ? "Online" : "Offline",
         uptime: bot ? `${Math.floor((Date.now() - bot.startTijd) / 1000)}s` : "0s",
         cpu: bot ? Math.floor(Math.random() * 3) + 1 : 0,
         ram: bot ? 24.2 : 0,
-        logs: bot ? [`Mainframe Connected.`, `[OK] Instance payload: ${bot.statusTekst}`, `[OK] Gateway: ${bot.statusType.toUpperCase()}`] : ["Instance offline."]
+        logs: bot ? [`[OK] Matrix verbinding akkoord.`, `[LIVE] Activiteit: ${bot.statusTekst}`, `[GATEWAY] Status: ${bot.statusType.toUpperCase()}`] : ["Systeem stand-by."]
     });
 });
 
-// AUTOMATISCHE BOOT-LOADER (Zorgt dat bij een online server-reboot alle bots direct weer opstarten!)
+// AUTO-BOOTSTRAP LOADER (Zorgt dat bij een herstart alle opgeslagen bots direct weer online schieten)
 setTimeout(() => {
     const database = leesData();
     Object.keys(database.profiles).forEach(botId => {
         const b = database.profiles[botId];
-        console.log(`[AUTO-BOOT] Matrix herstart bot thread: ${b.naam}`);
+        console.log(`[AUTO-BOOT] Systeem start bot herstart: ${b.naam}`);
         startBotEngine(b.id, b.token, b.scripts || []);
     });
-}, 4000);
+}, 3000);
 
+// Dit koppelt de index.html DIRECT vast aan de serverpoort!
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-app.listen(PORT, '0.0.0.0', () => console.log(`🌍 Mainframe online via target container poort ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`🌍 Mainframe draait nu stabiel op poort ${PORT}!`));

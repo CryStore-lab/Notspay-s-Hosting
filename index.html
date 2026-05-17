@@ -112,10 +112,6 @@
     <div id="token-popup" class="modal-overlay hidden" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(4,5,7,0.85); display:flex; align-items:center; justify-content:center; z-index:1000;">
         <div class="modal-card" style="background:var(--bg-card); padding:30px; border-radius:12px; width:400px; border:1px solid #1f2335;">
             <h2 style="color:#fff; margin-top:0;">🔐 Link Access Matrix</h2>
-            
-            <label style="color:#565f89; font-size:12px; display:block; margin-bottom:6px;">Live Server Link (Laat leeg voor VS Code lokaal)</label>
-            <input type="text" id="liveServerUrlInput" placeholder="Bijv. http://jouw-notspay-ip:3000" class="saas-input" style="margin-bottom:15px;">
-
             <label style="color:#565f89; font-size:12px; display:block; margin-bottom:6px;">Discord Bot Token</label>
             <input type="password" id="botTokenInput" placeholder="Paste token here..." class="saas-input" style="margin-bottom:20px;">
             <div style="display:flex; justify-content:flex-end; gap:10px;">
@@ -261,9 +257,11 @@
     </div>
 
     <script>
+        // HOOT FIX: Sloop de vaste link eruit. Systeem kijkt NU direct naar de URL van je browser!
+        const API_BASE = window.location.protocol + '//' + window.location.host;
         let botClusterMap = JSON.parse(localStorage.getItem('notspay_bot_cluster')) || {};
+        
         let actieveBotId = null;
-        let API_BASE = null;
         let botMetersInterval = null;
         let isLockdownActief = false;
 
@@ -295,21 +293,14 @@
 
         async function valideerEnSlaOp() {
             const token = document.getElementById('botTokenInput').value.trim();
-            let ingevuldeHost = document.getElementById('liveServerUrlInput').value.trim();
             if(!token) return;
-
-            // FIX: Als het veld leeg is pakt hij automatisch de huidige locatie (handig voor VS Code)
-            if(!ingevuldeHost) {
-                ingevuldeHost = window.location.protocol + '//' + window.location.host;
-            }
-            if(ingevuldeHost.endsWith('/')) ingevuldeHost = ingevuldeHost.slice(0, -1);
 
             const verifyBtn = document.getElementById('verifyBtn');
             verifyBtn.innerText = "Verifying...";
             verifyBtn.disabled = true;
 
             try {
-                const res = await fetch(`${ingevuldeHost}/api/sync-bot`, {
+                const res = await fetch(`${API_BASE}/api/sync-bot`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ token, scripts: [] })
@@ -322,18 +313,16 @@
                         token: token,
                         naam: data.bot.naam,
                         logo: data.bot.logo,
-                        serverUrl: ingevuldeHost,
                         scripts: []
                     };
                     
                     localStorage.setItem('notspay_bot_cluster', JSON.stringify(botClusterMap));
                     document.getElementById('token-popup').classList.add('hidden');
                     document.getElementById('botTokenInput').value = '';
-                    document.getElementById('liveServerUrlInput').value = '';
                     laadHub();
                 } else { alert("Fout: " + data.error); }
             } catch(err) {
-                alert("Matrix poort gesloten. Zorg dat server.js aan staat en de poort open is op de ingevulde host!");
+                alert("Matrix poort gesloten. Je server staat nog UIT op je host of in de terminal!");
             } finally {
                 verifyBtn.innerText = "Verify Bot";
                 verifyBtn.disabled = false;
@@ -343,8 +332,7 @@
         async function directVerwijderen(botId) {
             if(!confirm("Weet je zeker dat je deze bot wilt wissen uit het grid?")) return;
             try {
-                const targetHost = botClusterMap[botId].serverUrl;
-                await fetch(`${targetHost}/api/delete-bot`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botId }) });
+                await fetch(`${API_BASE}/api/delete-bot`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botId }) });
             } catch(e) {}
             delete botClusterMap[botId];
             localStorage.setItem('notspay_bot_cluster', JSON.stringify(botClusterMap));
@@ -353,8 +341,6 @@
 
         function openSpecifiekDashboard(botId) {
             actieveBotId = botId;
-            API_BASE = botClusterMap[botId].serverUrl; // Lock de API routering op de server van DEZE specifieke bot!
-
             document.getElementById('account-scherm').classList.add('hidden');
             document.getElementById('dashboard-interface').classList.remove('hidden');
             document.getElementById('dashboardBotNaam').innerText = botClusterMap[botId].naam;
@@ -366,7 +352,6 @@
 
         function terugNaarHub() {
             actieveBotId = null;
-            API_BASE = null;
             laadHub();
         }
 
