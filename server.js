@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const { Client, GatewayIntentBits, ChannelType, PermissionFlagsBits } = require('discord.js');
 const vm = require('vm'); 
+const fs = require('fs');
 const app = express();
 
 const PORT = process.env.PORT || 3000;
@@ -9,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// CORS BYPASS PROTOCOLS
+// CORS PROXY BYPASS (Zorgt dat browsers online altijd mogen verbinden)
 app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
@@ -17,7 +18,24 @@ app.use((req, res, next) => {
     next();
 });
 
-// MULTI-BOT RAM MATRIX
+// ONLINE BESTANDSOPSLAG MATRIX (Zorgt dat Notspay je bots onthoudt na een restart!)
+const dataFile = path.join(__dirname, 'notspay_multi_cluster.json');
+
+function leesData() {
+    if (!fs.existsSync(dataFile)) {
+        fs.writeFileSync(dataFile, JSON.stringify({ profiles: {} }, null, 2));
+    }
+    try { 
+        return JSON.parse(fs.readFileSync(dataFile, 'utf8')); 
+    } catch (e) { 
+        return { profiles: {} }; 
+    }
+}
+
+function schrijfData(data) {
+    fs.writeFileSync(dataFile, JSON.stringify(data, null, 2));
+}
+
 const actieveBots = new Map();
 
 function stopBotEngine(botId) {
@@ -41,7 +59,6 @@ async function startBotEngine(botId, token, scripts) {
             ] 
         });
 
-        // Sla elke bot-instance volledig apart op inclusief zijn eigen code-bestanden
         actieveBots.set(botId, { 
             client, 
             startTijd: Date.now(), 
@@ -87,7 +104,7 @@ async function startBotEngine(botId, token, scripts) {
         });
 
         client.once('ready', async () => {
-            console.log(`[CLUSTER] Bot Online: ${client.user.username} (${botId})`);
+            console.log(`[ONLINE] Matrix node active: ${client.user.username}`);
             const slashMenuLayout = [];
             if (scripts && scripts.length > 0) {
                 scripts.forEach(script => {
@@ -108,7 +125,7 @@ async function startBotEngine(botId, token, scripts) {
 
         await client.login(token);
     } catch (e) {
-        console.error(`[CRASH] Failed to initialize bot operational routing.`);
+        console.error(`[CRASH] Token handshake refused.`);
     }
 }
 
@@ -124,13 +141,22 @@ app.post('/api/sync-bot', async (req, res) => {
         const botLogo = testClient.user.displayAvatarURL({ format: 'png', size: 256 }) || "https://cdn.discordapp.com/embed/avatars/0.png";
         testClient.destroy();
 
+        // Onthoud de bot permanent in de database file op de online host
+        const database = leesData();
+        database.profiles[botId] = { id: botId, token, naam: botNaam, logo: botLogo, scripts: scripts || [] };
+        schrijfData(database);
+
         await startBotEngine(botId, token, scripts || []);
         res.json({ success: true, bot: { id: botId, naam: botNaam, logo: botLogo, status: "Online" } });
     } catch (e) { res.json({ success: false, error: "Invalid Discord Token." }); }
 });
 
 app.post('/api/delete-bot', (req, res) => { 
-    stopBotEngine(req.body.botId); 
+    const { botId } = req.body;
+    stopBotEngine(botId); 
+    const database = leesData();
+    delete database.profiles[botId];
+    schrijfData(database);
     res.json({ success: true }); 
 });
 
@@ -193,15 +219,25 @@ app.post('/api/settings/update', async (req, res) => {
         bot.statusType = statusType; bot.statusTekst = statusTekst;
         bot.client.user.setStatus(statusType); 
         bot.client.user.setActivity(statusTekst, { type: 0 }); 
+        
+        const database = leesData();
+        if(database.profiles[botId]) {
+            database.profiles[botId].statusType = statusType;
+            database.profiles[botId].statusTekst = statusTekst;
+            schrijfData(database);
+        }
         res.json({ success: true }); 
     } catch (e) { res.json({ success: false }); } 
 });
 
 app.post('/api/actie', async (req, res) => {
     const { actie, botId, token, scripts } = req.body;
-    if (!botId || !token) return res.json({ success: false, error: "Missing identity alignment arrays." });
+    if (!botId || !token) return res.json({ success: false, error: "Missing identity maps." });
     if (actie === 'stop') { stopBotEngine(botId); return res.json({ success: true, status: "Offline" }); }
-    if (actie === 'start' || actie === 'restart') { await startBotEngine(botId, token, scripts || []); return res.json({ success: true, status: "Online" }); }
+    if (actie === 'start' || actie === 'restart') { 
+        await startBotEngine(botId, token, scripts || []); 
+        return res.json({ success: true, status: "Online" }); 
+    }
     res.json({ success: false });
 });
 
@@ -213,9 +249,19 @@ app.post('/api/status', (req, res) => {
         uptime: bot ? `${Math.floor((Date.now() - bot.startTijd) / 1000)}s` : "0s",
         cpu: bot ? Math.floor(Math.random() * 3) + 1 : 0,
         ram: bot ? 24.2 : 0,
-        logs: bot ? ["Authorized Connection Core Stable.", `[OK] Instance payload: ${bot.statusTekst}`, `[OK] Gateway: ${bot.statusType.toUpperCase()}`] : ["Instance offline."]
+        logs: bot ? [`Mainframe Connected.`, `[OK] Instance payload: ${bot.statusTekst}`, `[OK] Gateway: ${bot.statusType.toUpperCase()}`] : ["Instance offline."]
     });
 });
 
+// AUTOMATISCHE BOOT-LOADER (Zorgt dat bij een online server-reboot alle bots direct weer opstarten!)
+setTimeout(() => {
+    const database = leesData();
+    Object.keys(database.profiles).forEach(botId => {
+        const b = database.profiles[botId];
+        console.log(`[AUTO-BOOT] Matrix herstart bot thread: ${b.naam}`);
+        startBotEngine(b.id, b.token, b.scripts || []);
+    });
+}, 4000);
+
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-app.listen(PORT, '0.0.0.0', () => console.log(`🌍 Mainframe live on port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`🌍 Mainframe online via target container poort ${PORT}`));
