@@ -257,7 +257,6 @@
     </div>
 
     <script>
-        // HOOT FIX: Sloop de vaste link eruit. Systeem kijkt NU direct naar de URL van je browser!
         const API_BASE = window.location.protocol + '//' + window.location.host;
         let botClusterMap = JSON.parse(localStorage.getItem('notspay_bot_cluster')) || {};
         
@@ -322,7 +321,7 @@
                     laadHub();
                 } else { alert("Fout: " + data.error); }
             } catch(err) {
-                alert("Matrix poort gesloten. Je server staat nog UIT op je host of in de terminal!");
+                alert("Matrix poort gesloten. Zorg dat server.js aan staat.");
             } finally {
                 verifyBtn.innerText = "Verify Bot";
                 verifyBtn.disabled = false;
